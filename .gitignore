@@ -3,3 +3,4 @@ dist/
 coverage/
 .env
 backend/uploads/
+CLAUDE.md
