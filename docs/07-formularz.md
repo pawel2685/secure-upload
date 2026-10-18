@@ -1,68 +1,24 @@
 # 7. Formularz (frontend)
 
-Backend (`vulnerable` i `secure`) jest gotowy i przetestowany. Ten rozdział opisuje, co formularz we frontendzie musi zrobić, żeby się z nim poprawnie łączyć. Uruchomienie całości — [README.md](../README.md).
+Frontend React + TypeScript działa pod `http://127.0.0.1:5173`. W katalogu `frontend` uruchom `npm run dev`; backend i MySQL muszą działać. Vite przekazuje żądania `/api` do `http://127.0.0.1:3000`. Serwery nasłuchują wyłącznie lokalnie.
 
-## Autoryzacja
+## Obsługa panelu
 
-Bez prawdziwego logowania. Każde żądanie do `/api/vulnerable/...` i `/api/secure/...` niesie nagłówek `X-User` z wartością `user1` lub `user2` (domyślnie `user1`, inna wartość → `401`). W UI wystarczy prosty przełącznik/select "zalogowany jako: user1 / user2", bez hasła.
+Domyślnie aktywna jest wersja **Zabezpieczona**. Przełącznik **Podatna / Zabezpieczona** zmienia prefiks API (`/api/vulnerable` lub `/api/secure`), opis zabezpieczeń i listę plików. Zmiana wersji lub użytkownika czyści wybrany plik i komunikat poprzedniej operacji. Podczas przesyłania i pobierania wybór wersji oraz użytkownika jest zablokowany.
 
-## Endpointy (identyczne dla obu wersji, inny prefiks)
+Wybierz `user1` lub `user2`, wskaż plik przyciskiem albo przeciągnij go na formularz i kliknij **Prześlij plik**. Formularz wysyła `multipart/form-data` z polem `file`. Przeglądarka nie blokuje typów ani rozmiarów plików testowych; walidację wykonuje backend. Limit w wersji secure wynosi domyślnie 5 MB i zależy od `MAX_FILE_SIZE_MB` w backendzie.
 
-Prefiks: `/api/vulnerable` albo `/api/secure`.
+Lista pokazuje nazwę, ID, typ, rozmiar i datę. W wersji podatnej obejmuje wszystkich użytkowników i dodatkowo pokazuje właściciela. Każde żądanie, także pobranie przez `fetch` i `Blob`, przesyła nagłówek `X-User`. Jest to symulacja użytkownika, nie rzeczywiste logowanie.
 
-| Metoda | Ścieżka | Opis |
-|---|---|---|
-| POST | `/upload` | multipart/form-data, pole pliku: `file` |
-| GET | `/files` | lista plików (w `secure` tylko własnych) |
-| GET | `/download/:id` | pobranie pliku |
-| GET | `/ping` | `{ "version": "vulnerable" \| "secure" }` — do sprawdzenia połączenia |
+Pole **Sprawdź dostęp po ID** pozwala wpisać ID pliku drugiego użytkownika. Historia zachowuje ostatnie 30 operacji wraz z wersją, użytkownikiem i faktycznym kodem HTTP; znika po odświeżeniu strony. Błędy sieci są odróżniane od odpowiedzi HTTP. Status API i MySQL odświeża się co 15 sekund.
 
-### Upload — przykład
+## Krótka demonstracja
 
-```js
-const form = new FormData();
-form.append('file', fileInput.files[0]);
+1. W wersji zabezpieczonej jako `user1` prześlij `frontend/test-fixtures/demo.txt` i zapamiętaj ID. Właściciel może pobrać plik (`200`).
+2. Wybierz `user2`: plik znika z listy. Próba pobrania po zapamiętanym ID zwraca `404`.
+3. Prześlij `frontend/test-fixtures/niezgodny.jpg` (tekst z rozszerzeniem obrazu): secure zwraca `415`.
+4. Wybierz wersję podatną i powtórz upload tego pliku: backend akceptuje go. Obie wersje mają oddzielne listy plików.
 
-const res = await fetch('http://127.0.0.1:3000/api/secure/upload', {
-  method: 'POST',
-  headers: { 'X-User': currentUser }, // 'user1' | 'user2'
-  body: form,
-});
-const data = await res.json();
-// 201: { id, name, size, type }  (secure nie zwraca "path")
-// 201: { id, name, path, size, type }  (vulnerable zwraca "path")
-```
+Zweryfikowano w przeglądarce: przełączanie wersji, upload TXT (`201`), pobieranie przez właściciela (`200`), odmowę dla drugiego użytkownika (`404`) i odrzucenie niezgodnego JPG (`415`). Kompilacja TypeScript, build Vite i ESLint przechodzą.
 
-Kody błędów, które formularz powinien obsłużyć (głównie w wersji `secure` — w `vulnerable` celowo prawie nic nie jest blokowane):
-
-| Kod | Kiedy | Wersja |
-|---|---|---|
-| 400 | brak pliku w żądaniu | obie |
-| 401 | nieznany `X-User` | obie |
-| 413 | plik większy niż limit (domyślnie 5 MB, `MAX_FILE_SIZE_MB` w `.env`) | secure |
-| 415 | typ pliku nierozpoznany/niezgodny z zawartością (dozwolone: jpg, jpeg, png, gif, pdf, txt) | secure |
-
-### Lista plików
-
-```js
-const res = await fetch('http://127.0.0.1:3000/api/secure/files', {
-  headers: { 'X-User': currentUser },
-});
-const files = await res.json();
-// [{ id, original_name, mime_type, size, created_at }, ...]
-// (vulnerable zwraca dodatkowo "owner" i pliki WSZYSTKICH użytkowników — to celowa dziura)
-```
-
-### Download
-
-Zwykły link/`<a href>` wystarczy, to nie jest JSON tylko plik:
-```html
-<a href="http://127.0.0.1:3000/api/secure/download/3">Pobierz</a>
-```
-Uwaga: `fetch`/link nie wysyła nagłówka `X-User` z poziomu zwykłego `<a>` — jeśli trzeba go ustawić, pobieranie musi iść przez `fetch` + `Blob` + link tymczasowy, albo backend trzeba by rozszerzyć o inny sposób identyfikacji (poza obecnym zakresem). W testach i Burp/curl nagłówek ustawiamy ręcznie.
-
-## Sugerowany układ UI
-
-Jeden ekran, przełącznik u góry: **wersja podatna / zabezpieczona** (czyli po prostu zmiana prefiksu `/api/vulnerable` ↔ `/api/secure` w żądaniach) — to pozwala w sprawozdaniu pokazać na żywo różnicę w zachowaniu tego samego formularza. Pod spodem: wybór użytkownika (`user1`/`user2`), pole uploadu, lista plików z linkami do pobrania, miejsce na komunikat błędu (treść z `res.json().error`).
-
-Walidacji po stronie przeglądarki (typ/rozmiar pliku) robić nie trzeba — i tak nic nie znaczy, bo serwer sam weryfikuje wszystko ponownie. Jeśli chcesz dodać coś dla wygody (np. podpowiedź limitu 5 MB), to wyłącznie kosmetyka UX, nie zabezpieczenie.
+> **[ZRZUT EKRANU DO DODANIA: panel w trybie zabezpieczonym z listą plików oraz historią odpowiedzi 201, 200, 404 i 415]**
