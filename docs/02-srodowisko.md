@@ -44,5 +44,3 @@ Stan na koniec etapu 2 (szkielet i baza):
 - `README.md` – instrukcja uruchomienia, `.gitignore` – wyklucza m.in. `node_modules/`, `.env` i `backend/uploads/`.
 
 Pliki `tests/` powstaną w kolejnych etapach i zostaną opisane po ich zamknięciu.
-
-![Struktura folderów projektu](img/struktura.png)
