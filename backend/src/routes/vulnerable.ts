@@ -1,4 +1,4 @@
-import { sep } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
@@ -65,4 +65,20 @@ router.get('/download/:id', async (req, res) => {
   }
 
   res.download(row.path, row.original_name);
+});
+
+// VULNERABLE: plik serwowany "inline" (bez Content-Disposition: attachment, bez nosniff i CSP), typ wynika z rozszerzenia nazwy od klienta.
+// SVG/HTML wykonuje wtedy skrypt w origin aplikacji (stored XSS). Brak też kontroli właściciela (IDOR).
+router.get('/view/:id', async (req, res) => {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    "SELECT path FROM files WHERE version = 'vulnerable' AND id = ?",
+    [req.params.id],
+  );
+  const row = rows[0];
+  if (!row) {
+    res.status(404).json({ error: 'Nie znaleziono pliku' });
+    return;
+  }
+
+  res.sendFile(resolve(row.path));
 });
