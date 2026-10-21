@@ -1,0 +1,22 @@
+%%{init: {"theme": "default", "flowchart": {"nodeSpacing": 70, "rankSpacing": 220}}}%%
+flowchart LR
+  subgraph NZ["Strefa niezaufana (klient)"]
+    U["Użytkownik lub atakujący<br/>przeglądarka, curl, Burp<br/>(user1, user2)"]
+    F["Frontend React<br/>127.0.0.1:5173"]
+  end
+
+  subgraph Z["Strefa zaufana (127.0.0.1)"]
+    B["Backend Express :3000<br/>/api/vulnerable i /api/secure"]
+    DB[("MySQL<br/>tabela files")]
+    D[("Dysk<br/>backend/uploads/")]
+  end
+
+  U -->|"wybór pliku"| F
+  U -.->|"bezpośrednio:<br/>curl, Burp"| B
+  F -->|"1. żądanie: upload (plik, nazwa, typ)<br/>lub pobranie (ID)<br/>[Z1 Z2 Z3 Z5 Z6]"| B
+  B -->|"2. odpowiedź: plik, błędy<br/>[Z4 Z7]"| F
+  B -->|"3. zapis metadanych (SQL)<br/>[Z6]"| DB
+  B <-->|"4. zapis i odczyt pliku<br/>[Z2]"| D
+
+  style NZ fill:none,stroke:#c0392b,stroke-width:2px,stroke-dasharray:6 4
+  style Z fill:none,stroke:#27ae60,stroke-width:2px

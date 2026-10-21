@@ -9,12 +9,23 @@ import { pool } from '../db.js';
 // SECURE: wersja zabezpieczona, każda ochrona jest opisana w komentarzu.
 export const router = Router();
 
+// SECURE: nagłówki ochronne na każdej odpowiedzi — nosniff (przeglądarka nie zgaduje typu pliku) i CSP bez skryptów (sandbox),
+// dodatkowo bez X-Powered-By (nie zdradzamy technologii serwera).
+router.use((_req, res, next) => {
+  res.removeHeader('X-Powered-By');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  next();
+});
+
 // SECURE: limit rozmiaru konfigurowalny przez .env (domyślnie 5 MB), zamiast sztywnej wartości w kodzie.
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB ?? 5);
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
+const MAX_NAME_LENGTH = 255;
 
 // SECURE: plik trzymamy w pamięci, dopóki nie sprawdzimy jego zawartości — nic nie trafia na dysk bez walidacji.
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE_SIZE } });
+// Limity: rozmiar pliku i liczba plików na żądanie (jeden).
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE_SIZE, files: 1 } });
 
 const isJpeg = (b: Buffer) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 
@@ -61,6 +72,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ error: 'Brak pliku (pole formularza: file)' });
+    return;
+  }
+
+  // SECURE: nazwa dłuższa niż kolumna w bazie jest odrzucana wprost (400), zamiast kończyć się błędem bazy (500).
+  if (file.originalname.length > MAX_NAME_LENGTH) {
+    res.status(400).json({ error: `Nazwa pliku jest za długa (limit ${MAX_NAME_LENGTH} znaków)` });
     return;
   }
 
@@ -125,11 +142,15 @@ router.get('/download/:id', async (req, res) => {
   res.download(row.path, row.original_name);
 });
 
-// SECURE: własny error handler — błąd Multera (np. za duży plik) albo inny wyjątek wraca jako czysty JSON,
-// zamiast domyślnej strony Expressa ze stack trace'em (wyciek szczegółów implementacji).
+// SECURE: własny error handler — błąd Multera (za duży plik, zła nazwa pola, więcej niż jeden plik) albo inny wyjątek
+// wraca jako czysty JSON z właściwym kodem, zamiast domyślnej strony Expressa ze stack trace'em (wyciek szczegółów implementacji).
 router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    res.status(413).json({ error: `Plik jest za duży (limit ${MAX_FILE_SIZE_MB} MB)` });
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      res.status(413).json({ error: `Plik jest za duży (limit ${MAX_FILE_SIZE_MB} MB)` });
+      return;
+    }
+    res.status(400).json({ error: 'Nieprawidłowe żądanie uploadu (jedno pole formularza: file, jeden plik)' });
     return;
   }
   console.error(err);
